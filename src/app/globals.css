@@ -124,4 +124,8 @@
     image-rendering: -moz-crisp-edges;
     image-rendering: crisp-edges;
   }
+  /* Ensure toasts appear above sheets (z-50) */
+  [data-sonner-toaster] {
+    z-index: 9999 !important;
+  }
 }

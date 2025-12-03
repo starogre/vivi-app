@@ -6,19 +6,30 @@ import { TaskItem } from '@/components/task-item';
 import { TaskDetailSheet } from '@/components/task-detail-sheet';
 import { DigitalJanitor } from '@/components/digital-janitor';
 import { DailyStartupWidget } from '@/components/daily-startup-widget';
+import { ImageLightbox } from '@/components/image-lightbox';
 import { db, Task } from '@/lib/db';
 import { checkTaskHealth } from '@/lib/taskHealth';
+import { compressImage } from '@/lib/imageUtils';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Archive, CalendarDays, Sparkles, FileText } from 'lucide-react';
+import { Loader2, Archive, CalendarDays, Sparkles, FileText, Menu } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { toast } from 'sonner';
 
 export default function Home() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [janitorOpen, setJanitorOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
   const queryClient = useQueryClient();
 
   const { data: tasks, isLoading } = useQuery({
@@ -90,6 +101,35 @@ export default function Home() {
     }
   };
 
+  const handleImageAdd = async (task: Task, files: File[]) => {
+    if (!task.id || files.length === 0) return;
+
+    try {
+      const compressedImages = await Promise.all(
+        files.map(file => compressImage(file))
+      );
+
+      const currentImages = task.images || [];
+      const updatedImages = [...currentImages, ...compressedImages];
+
+      updateTaskMutation.mutate({
+        taskId: task.id,
+        updates: { images: updatedImages }
+      });
+    } catch (error) {
+      toast.error('Failed to add images');
+      console.error('Error compressing images:', error);
+    }
+  };
+
+  const handleImageClick = (task: Task) => {
+    if (task.images && task.images.length > 0) {
+      setSelectedTask(task);
+      setLightboxIndex(0);
+      setLightboxOpen(true);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -112,13 +152,15 @@ export default function Home() {
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Top Bar / Command Line */}
-          <div className="border-b p-6 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10">
-             <div className="flex justify-between items-center mb-4">
-                <h1 className="text-2xl font-bold hidden md:flex items-center gap-2">
-                  <img src="/BlackMage.gif" alt="Vivi" className="h-8 pixelated" />
-                  Vivi
+          <div className="border-b p-3 sm:p-6 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10">
+             <div className="flex justify-between items-center mb-3 sm:mb-4 gap-2">
+                <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
+                  <img src="/BlackMage.gif" alt="Vivi" className="h-6 sm:h-8 pixelated" />
+                  <span className="hidden sm:inline">Vivi</span>
                 </h1>
-                <div className="flex gap-2">
+                
+                {/* Desktop Buttons */}
+                <div className="hidden md:flex gap-2">
                   <Button variant="outline" size="sm" className="gap-2" onClick={() => setSidebarOpen(!sidebarOpen)}>
                     <FileText className="h-4 w-4" />
                     Generate
@@ -146,12 +188,49 @@ export default function Home() {
                     </Button>
                   </Link>
                 </div>
+
+                {/* Mobile Menu */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="md:hidden">
+                      <Menu className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem onClick={() => setSidebarOpen(!sidebarOpen)}>
+                      <FileText className="h-4 w-4 mr-2" />
+                      Generate
+                    </DropdownMenuItem>
+                    <Link href="/links">
+                      <DropdownMenuItem>
+                        <FileText className="h-4 w-4 mr-2" />
+                        Links
+                      </DropdownMenuItem>
+                    </Link>
+                    <Link href="/weekly-review">
+                      <DropdownMenuItem>
+                        <CalendarDays className="h-4 w-4 mr-2" />
+                        Weekly Review
+                      </DropdownMenuItem>
+                    </Link>
+                    <DropdownMenuItem onClick={() => setJanitorOpen(true)}>
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Janitor
+                    </DropdownMenuItem>
+                    <Link href="/archive">
+                      <DropdownMenuItem>
+                        <Archive className="h-4 w-4 mr-2" />
+                        Archive
+                      </DropdownMenuItem>
+                    </Link>
+                  </DropdownMenuContent>
+                </DropdownMenu>
              </div>
              <CommandLine />
           </div>
 
           {/* Scrollable Task Area */}
-          <div className="flex-1 overflow-y-auto p-6">
+          <div className="flex-1 overflow-y-auto p-3 sm:p-6">
              <div className="max-w-3xl mx-auto space-y-8">
                 
                 {/* Daily Startup Widget */}
@@ -172,6 +251,9 @@ export default function Home() {
                            onToggleComplete={(checked) => handleToggleComplete(task, checked)}
                            onMoveToFocus={() => handleMoveToFocus(task)}
                            onRemoveFromFocus={() => handleRemoveFromFocus(task)}
+                           onImageAdd={(files) => handleImageAdd(task, files)}
+                           onImageClick={() => handleImageClick(task)}
+                           lightboxOpen={lightboxOpen && selectedTask?.id === task.id}
                          />
                        ))}
                      </div>
@@ -193,6 +275,9 @@ export default function Home() {
                            onToggleComplete={(checked) => handleToggleComplete(task, checked)}
                            onMoveToFocus={() => handleMoveToFocus(task)}
                            onRemoveFromFocus={() => handleRemoveFromFocus(task)}
+                           onImageAdd={(files) => handleImageAdd(task, files)}
+                           onImageClick={() => handleImageClick(task)}
+                           lightboxOpen={lightboxOpen && selectedTask?.id === task.id}
                          />
                        ))}
                      </div>
@@ -219,6 +304,16 @@ export default function Home() {
         open={janitorOpen} 
         onOpenChange={setJanitorOpen}
       />
+
+      {/* Image Lightbox */}
+      {selectedTask?.images && selectedTask.images.length > 0 && (
+        <ImageLightbox
+          images={selectedTask.images}
+          initialIndex={lightboxIndex}
+          open={lightboxOpen}
+          onClose={() => setLightboxOpen(false)}
+        />
+      )}
     </>
   );
 }

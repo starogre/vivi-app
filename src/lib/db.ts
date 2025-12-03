@@ -9,6 +9,13 @@ export interface SubTask {
   completed: boolean;
 }
 
+export interface TaskImage {
+  id: string;
+  data: string; // base64 encoded
+  mimeType: string;
+  createdAt: number;
+}
+
 export interface Task {
   id?: number;
   title: string;
@@ -22,7 +29,7 @@ export interface Task {
   notes?: string;
   isStale?: boolean;
   description?: string;
-  images?: string[]; // base64 encoded images
+  images?: TaskImage[];
   subTasks?: SubTask[];
 }
 
@@ -73,6 +80,31 @@ export class MySubClassedDexie extends Dexie {
       tasks: '++id, title, status, priority, dueDate, externalLink, createdAt, completedAt, isFocus, isStale',
       links: '++id, url, domain, sourceTaskId, createdAt',
       dailyStates: '++id, date'
+    });
+
+    // Version 4: Update images to be TaskImage[] array
+    this.version(4).stores({
+      tasks: '++id, title, status, priority, dueDate, externalLink, createdAt, completedAt, isFocus, isStale',
+      links: '++id, url, domain, sourceTaskId, createdAt',
+      dailyStates: '++id, date'
+    }).upgrade(tx => {
+      // Migrate old string[] images to TaskImage[] format
+      return tx.table('tasks').toCollection().modify(task => {
+        if (task.images && Array.isArray(task.images)) {
+          // Check if images are old format (string[]) or new format (TaskImage[])
+          if (task.images.length > 0 && typeof task.images[0] === 'string') {
+            // Convert old format to new format
+            task.images = (task.images as string[]).map((data, index) => ({
+              id: `img-${task.id}-${index}-${Date.now()}`,
+              data,
+              mimeType: 'image/png', // Default, will be detected if possible
+              createdAt: Date.now()
+            }));
+          }
+        } else {
+          task.images = [];
+        }
+      });
     });
   }
 }
