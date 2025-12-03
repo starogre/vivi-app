@@ -4,11 +4,17 @@ import { TaskItem } from '@/components/task-item';
 import { TaskDetailSheet } from '@/components/task-detail-sheet';
 import { db, Task } from '@/lib/db';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, ArrowLeft, RotateCcw, Calendar, Filter } from 'lucide-react';
+import { Loader2, ArrowLeft, RotateCcw, Filter, Menu } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { startOfWeek, endOfWeek, format, startOfMonth, endOfMonth, startOfYear, endOfYear, subDays, subWeeks, subMonths } from 'date-fns';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
@@ -203,24 +209,25 @@ export default function ArchivePage() {
 
   return (
     <>
-      <div className="min-h-screen bg-background text-foreground p-6">
-        <div className="max-w-3xl mx-auto space-y-8">
-          <div className="flex items-center justify-between mb-8">
-            <div className="flex items-center gap-4">
+      <div className="min-h-screen bg-background text-foreground p-3 sm:p-6">
+        <div className="max-w-3xl mx-auto space-y-6 sm:space-y-8">
+          <div className="flex items-center justify-between mb-6 sm:mb-8 gap-2">
+            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
               <Link href="/">
-                <Button variant="ghost" size="icon">
+                <Button variant="ghost" size="icon" className="flex-shrink-0">
                   <ArrowLeft className="h-5 w-5" />
                 </Button>
               </Link>
-              <div>
-                <h1 className="text-2xl font-bold">Archive</h1>
-                <p className="text-sm text-muted-foreground">
+              <div className="min-w-0">
+                <h1 className="text-xl sm:text-2xl font-bold truncate">Archive</h1>
+                <p className="text-xs sm:text-sm text-muted-foreground">
                   {filteredTasks.length} of {completedTasks.length} completed tasks
                 </p>
               </div>
             </div>
             
-            <div className="flex items-center gap-2">
+            {/* Desktop Actions */}
+            <div className="hidden md:flex items-center gap-2">
               {bulkSelectMode ? (
                 <>
                   <Button variant="outline" size="sm" onClick={handleSelectAll}>
@@ -252,46 +259,86 @@ export default function ArchivePage() {
                 </Button>
               )}
             </div>
+
+            {/* Mobile Actions */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="md:hidden flex-shrink-0">
+                  <Menu className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                {bulkSelectMode ? (
+                  <>
+                    <DropdownMenuItem onClick={handleSelectAll}>
+                      Select All
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleDeselectAll}>
+                      Deselect All
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      onClick={() => bulkRestoreMutation.mutate(Array.from(selectedTaskIds))}
+                      disabled={selectedTaskIds.size === 0}
+                    >
+                      <RotateCcw className="h-4 w-4 mr-2" />
+                      Restore ({selectedTaskIds.size})
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => {
+                      setBulkSelectMode(false);
+                      setSelectedTaskIds(new Set());
+                    }}>
+                      Cancel
+                    </DropdownMenuItem>
+                  </>
+                ) : (
+                  <DropdownMenuItem onClick={() => setBulkSelectMode(true)}>
+                    Bulk Restore
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           {/* Filters */}
-          <div className="flex items-center gap-4 p-4 border rounded-lg bg-card">
-            <Filter className="h-4 w-4 text-muted-foreground" />
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium">Completed:</label>
-              <Select value={completedFilter} onValueChange={(v) => setCompletedFilter(v as FilterType)}>
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Time</SelectItem>
-                  <SelectItem value="this-week">This Week</SelectItem>
-                  <SelectItem value="last-week">Last Week</SelectItem>
-                  <SelectItem value="this-month">This Month</SelectItem>
-                  <SelectItem value="last-month">Last Month</SelectItem>
-                  <SelectItem value="this-year">This Year</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium">Due Date:</label>
-              <Select value={dueDateFilter} onValueChange={(v) => setDueDateFilter(v as FilterType)}>
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="this-week">This Week</SelectItem>
-                  <SelectItem value="last-week">Last Week</SelectItem>
-                  <SelectItem value="this-month">This Month</SelectItem>
-                  <SelectItem value="last-month">Last Month</SelectItem>
-                  <SelectItem value="this-year">This Year</SelectItem>
-                </SelectContent>
-              </Select>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 p-3 sm:p-4 border rounded-lg bg-card">
+            <Filter className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4 w-full">
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <label className="text-xs sm:text-sm font-medium whitespace-nowrap">Completed:</label>
+                <Select value={completedFilter} onValueChange={(v) => setCompletedFilter(v as FilterType)}>
+                  <SelectTrigger className="w-full sm:w-[140px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Time</SelectItem>
+                    <SelectItem value="this-week">This Week</SelectItem>
+                    <SelectItem value="last-week">Last Week</SelectItem>
+                    <SelectItem value="this-month">This Month</SelectItem>
+                    <SelectItem value="last-month">Last Month</SelectItem>
+                    <SelectItem value="this-year">This Year</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <label className="text-xs sm:text-sm font-medium whitespace-nowrap">Due Date:</label>
+                <Select value={dueDateFilter} onValueChange={(v) => setDueDateFilter(v as FilterType)}>
+                  <SelectTrigger className="w-full sm:w-[140px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    <SelectItem value="this-week">This Week</SelectItem>
+                    <SelectItem value="last-week">Last Week</SelectItem>
+                    <SelectItem value="this-month">This Month</SelectItem>
+                    <SelectItem value="last-month">Last Month</SelectItem>
+                    <SelectItem value="this-year">This Year</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
 
-          <div className="space-y-8">
+          <div className="space-y-6 sm:space-y-8">
             {sortedGroups.length === 0 ? (
               <p className="text-muted-foreground italic text-center">
                 No tasks found matching your filters.
@@ -304,7 +351,7 @@ export default function ArchivePage() {
 
                 return (
                   <section key={group.weekStart.toISOString()} className="space-y-4">
-                     <h3 className="text-lg font-semibold text-muted-foreground sticky top-0 bg-background py-2 z-10 border-b">
+                     <h3 className="text-base sm:text-lg font-semibold text-muted-foreground sticky top-0 bg-background py-2 z-10 border-b">
                        Week of {dateRange}
                      </h3>
                      <div className="space-y-1.5">
@@ -316,7 +363,7 @@ export default function ArchivePage() {
                                onCheckedChange={() => toggleTaskSelection(task.id!)}
                              />
                            )}
-                           <div className={cn("flex-1", bulkSelectMode && "cursor-pointer")} onClick={() => handleTaskClick(task)}>
+                           <div className={cn("flex-1 min-w-0", bulkSelectMode && "cursor-pointer")} onClick={() => handleTaskClick(task)}>
                              <TaskItem 
                                task={task} 
                                onClick={() => !bulkSelectMode && handleTaskClick(task)}
@@ -333,10 +380,10 @@ export default function ArchivePage() {
                                size="sm"
                                onClick={() => handleRestore(task)}
                                disabled={restoreTaskMutation.isPending}
-                               className="gap-2"
+                               className="gap-2 flex-shrink-0"
                              >
-                               <RotateCcw className="h-3.5 w-3.5" />
-                               Restore
+                               <RotateCcw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                               <span className="hidden sm:inline">Restore</span>
                              </Button>
                            )}
                          </div>

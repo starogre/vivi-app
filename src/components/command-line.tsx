@@ -56,6 +56,8 @@ export function CommandLine() {
       queryClient.invalidateQueries({ queryKey: ['links'] });
       queryClient.invalidateQueries({ queryKey: ['archive-tasks'] });
       setInput('');
+      // Refocus input after submission for quick entry
+      setTimeout(() => inputRef.current?.focus(), 100);
     },
   });
 
@@ -65,32 +67,36 @@ export function CommandLine() {
     addTaskMutation.mutate(input);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Handle Enter key - works on both desktop and mobile keyboards
     if (e.key === 'Enter') {
+      e.preventDefault();
       handleSubmit();
     }
   };
 
   return (
-    <div className="w-full max-w-3xl mx-auto p-4">
+    <form onSubmit={handleSubmit} className="w-full max-w-3xl mx-auto">
       <div className="relative flex items-center">
         <Input
           ref={inputRef}
+          type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Try '/did Finished the report' or 'Meeting by Friday #h' (Press 'E' to focus)"
-          className="h-14 text-lg pr-12 shadow-lg border-2 focus-visible:ring-2 focus-visible:ring-primary"
+          placeholder="Try '/did Finished the report' or 'Meeting by Friday #h'"
+          className="h-12 sm:h-14 text-base sm:text-lg pr-12 sm:pr-14 shadow-lg border-2 focus-visible:ring-2 focus-visible:ring-primary"
+          enterKeyHint="done"
         />
         <Button 
-          onClick={() => handleSubmit()} 
+          type="submit"
           size="icon" 
-          className="absolute right-2 top-2 h-10 w-10 rounded-full"
+          className="absolute right-1 sm:right-2 top-1 sm:top-2 h-9 w-9 sm:h-10 sm:w-10 rounded-full"
           disabled={!input.trim()}
         >
-          <Plus className="h-5 w-5" />
+          <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
         </Button>
       </div>
-    </div>
+    </form>
   );
 }
