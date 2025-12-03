@@ -1,12 +1,14 @@
 'use client';
 
 import { db, Link, extractAndSaveLinks } from '@/lib/db';
+import { getLinkTypeLabel, shortenUrl } from '@/lib/linkUtils';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, ArrowLeft, ExternalLink, Search } from 'lucide-react';
 import LinkComponent from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 
@@ -50,11 +52,13 @@ export default function LinkLibraryPage() {
       const tasks = await db.tasks.toArray();
       
       for (const task of tasks) {
+        // Support both old externalLink and new externalLinks array
+        const links = task.externalLinks || (task.externalLink ? [task.externalLink] : []);
         const textToScan = [
           task.title,
           task.notes,
           task.description,
-          task.externalLink
+          ...links
         ].filter(Boolean).join(' ');
         
         if (textToScan) {
@@ -82,13 +86,28 @@ export default function LinkLibraryPage() {
   const archivedTaskIds = new Set(archivedTasks?.map(t => t.id).filter(Boolean) || []);
 
   // Split links into active and archived
-  const activeLinks = allLinks.filter(link => 
+  let activeLinks = allLinks.filter(link => 
     !link.sourceTaskId || activeTaskIds.has(link.sourceTaskId)
   );
   
-  const archivedLinks = allLinks.filter(link => 
+  let archivedLinks = allLinks.filter(link => 
     link.sourceTaskId && archivedTaskIds.has(link.sourceTaskId)
   );
+  
+  // Deduplicate links within each section (keep first occurrence)
+  const seenActiveUrls = new Set<string>();
+  activeLinks = activeLinks.filter(link => {
+    if (seenActiveUrls.has(link.url)) return false;
+    seenActiveUrls.add(link.url);
+    return true;
+  });
+  
+  const seenArchivedUrls = new Set<string>();
+  archivedLinks = archivedLinks.filter(link => {
+    if (seenArchivedUrls.has(link.url)) return false;
+    seenArchivedUrls.add(link.url);
+    return true;
+  });
   
   // Filter by search query
   const filterLinks = (linksList: Link[]) => {
@@ -142,28 +161,41 @@ export default function LinkLibraryPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {groupedLinks[domain].map((link) => (
-                  <div
-                    key={link.id}
-                    className="flex items-start justify-between p-2.5 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <a
-                        href={link.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm font-medium hover:underline flex items-center gap-2 text-blue-600"
-                      >
-                        {link.title}
-                        <ExternalLink className="h-3 w-3 flex-shrink-0" />
-                      </a>
-                      <p className="text-xs text-muted-foreground truncate mt-1">{link.url}</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {format(link.createdAt, 'MMM d, yyyy')}
-                      </p>
+                {groupedLinks[domain].map((link) => {
+                  const linkType = getLinkTypeLabel(link.url);
+                  const shortUrl = shortenUrl(link.url, 60);
+                  const showTypeLabel = linkType === 'Google Doc' || linkType === 'Google Sheet';
+                  
+                  return (
+                    <div
+                      key={link.id}
+                      className="flex items-start justify-between p-2.5 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={link.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm font-medium hover:underline flex items-center gap-2 text-blue-600"
+                          >
+                            {link.title}
+                            <ExternalLink className="h-3 w-3 flex-shrink-0" />
+                          </a>
+                          {showTypeLabel && (
+                            <Badge variant="outline" className="text-xs py-0 h-5">
+                              {linkType}
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate mt-1">{shortUrl}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {format(link.createdAt, 'MMM d, yyyy')}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </CardContent>
           </Card>

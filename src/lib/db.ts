@@ -22,7 +22,8 @@ export interface Task {
   status: TaskStatus;
   priority: Priority;
   dueDate?: Date;
-  externalLink?: string;
+  externalLink?: string; // Deprecated - use externalLinks instead
+  externalLinks?: string[]; // Array of URLs
   createdAt: Date;
   completedAt?: Date;
   isFocus: boolean;
@@ -106,6 +107,22 @@ export class MySubClassedDexie extends Dexie {
         }
       });
     });
+
+    // Version 5: Migrate externalLink to externalLinks array
+    this.version(5).stores({
+      tasks: '++id, title, status, priority, dueDate, externalLink, createdAt, completedAt, isFocus, isStale',
+      links: '++id, url, domain, sourceTaskId, createdAt',
+      dailyStates: '++id, date'
+    }).upgrade(tx => {
+      return tx.table('tasks').toCollection().modify(task => {
+        // Migrate single externalLink to externalLinks array
+        if (task.externalLink && typeof task.externalLink === 'string' && !task.externalLinks) {
+          task.externalLinks = [task.externalLink];
+        } else if (!task.externalLinks) {
+          task.externalLinks = [];
+        }
+      });
+    });
   }
 }
 
@@ -143,35 +160,69 @@ export async function extractAndSaveLinks(text: string, taskId?: number): Promis
   
   if (!urls || urls.length === 0) return;
   
+  // Import fetchPageTitle dynamically to avoid circular dependencies
+  const { fetchPageTitle, normalizeUrl } = await import('./linkUtils');
+  
   for (const url of urls) {
     try {
-      const urlObj = new URL(url);
+      const normalizedUrl = normalizeUrl(url);
+      const urlObj = new URL(normalizedUrl);
       const domain = urlObj.hostname.replace('www.', '');
       
-      // Generate a title based on domain
-      let title = domain;
-      if (domain.includes('figma.com')) title = 'Figma File';
-      else if (domain.includes('clickup.com')) title = 'ClickUp Task';
-      else if (domain.includes('google.com')) title = 'Google Doc';
-      else if (domain.includes('notion.so')) title = 'Notion Page';
-      else if (domain.includes('github.com')) title = 'GitHub';
-      else title = domain.charAt(0).toUpperCase() + domain.slice(1);
+      // Try to fetch actual page title
+      let title = await fetchPageTitle(normalizedUrl);
       
-      // Check if link already exists
-      const existing = await db.links.where('url').equals(url).first();
+      // Fallback to domain-based title if fetch fails
+      if (!title) {
+        const urlPath = urlObj.pathname.toLowerCase();
+        if (domain.includes('figma.com')) title = 'Figma File';
+        else if (domain.includes('clickup.com')) title = 'ClickUp Task';
+        else if (domain.includes('docs.google.com') && urlPath.includes('/document/')) title = 'Google Doc';
+        else if (domain.includes('docs.google.com') && urlPath.includes('/spreadsheets/')) title = 'Google Sheet';
+        else if (domain.includes('sheets.google.com')) title = 'Google Sheet';
+        else if (domain.includes('notion.so')) title = 'Notion Page';
+        else if (domain.includes('github.com')) title = 'GitHub';
+        else title = domain.charAt(0).toUpperCase() + domain.slice(1);
+      }
+      
+      // Check if link already exists for this task
+      const existing = await db.links
+        .where('url').equals(normalizedUrl)
+        .and(link => link.sourceTaskId === taskId)
+        .first();
       
       if (!existing) {
-        await db.links.add({
-          url,
-          title,
-          domain,
-          sourceTaskId: taskId,
-          createdAt: new Date()
-        });
+        // Check if link exists with different task (update title if needed)
+        const existingLink = await db.links.where('url').equals(normalizedUrl).first();
+        if (existingLink) {
+          // Update title if we got a better one
+          if (title && title !== existingLink.title) {
+            await db.links.update(existingLink.id!, { title });
+          }
+          // Add new link entry for this task
+          await db.links.add({
+            url: normalizedUrl,
+            title: existingLink.title, // Use existing title
+            domain,
+            sourceTaskId: taskId,
+            createdAt: new Date()
+          });
+        } else {
+          await db.links.add({
+            url: normalizedUrl,
+            title: title || domain,
+            domain,
+            sourceTaskId: taskId,
+            createdAt: new Date()
+          });
+        }
+      } else if (title && title !== existing.title) {
+        // Update existing link with better title
+        await db.links.update(existing.id!, { title });
       }
     } catch (e) {
       // Invalid URL, skip
-      console.warn('Invalid URL:', url);
+      console.warn('Invalid URL:', url, e);
     }
   }
 }

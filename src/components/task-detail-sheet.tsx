@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Task, TaskImage, db } from '@/lib/db';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
@@ -12,12 +12,15 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { ImageLightbox } from '@/components/image-lightbox';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, Trash2, ArrowRight, CheckCircle2, Circle, CalendarIcon, X, Image as ImageIcon, Upload, RotateCcw } from 'lucide-react';
+import { ExternalLink, Trash2, ArrowRight, CheckCircle2, Circle, CalendarIcon, X, Image as ImageIcon, Upload, RotateCcw, Edit2, Plus } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useDropzone } from 'react-dropzone';
 import { compressImage, getImageDataUrl } from '@/lib/imageUtils';
+import { extractAndSaveLinks } from '@/lib/db';
+import { normalizeUrl, shortenUrl, getLinkTypeLabel } from '@/lib/linkUtils';
 import { toast } from 'sonner';
+import { Input } from '@/components/ui/input';
 
 interface TaskDetailSheetProps {
   task: Task | null;
@@ -28,6 +31,11 @@ interface TaskDetailSheetProps {
 export function TaskDetailSheet({ task, open, onOpenChange }: TaskDetailSheetProps) {
   const queryClient = useQueryClient();
   const [description, setDescription] = useState(task?.description || '');
+  const [taskTitle, setTaskTitle] = useState(task?.title || '');
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [newLink, setNewLink] = useState('');
+  const [localLinks, setLocalLinks] = useState<string[]>([]);
+  const [linkTitles, setLinkTitles] = useState<Record<string, string>>({});
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [localImages, setLocalImages] = useState<TaskImage[]>(task?.images || []);
@@ -36,7 +44,26 @@ export function TaskDetailSheet({ task, open, onOpenChange }: TaskDetailSheetPro
   useEffect(() => {
     if (task) {
       setDescription(task.description || '');
+      setTaskTitle(task.title || '');
       setLocalImages(task.images || []);
+      // Support both old externalLink and new externalLinks
+      const links = task.externalLinks || (task.externalLink ? [task.externalLink] : []);
+      setLocalLinks(links);
+      setIsEditingTitle(false);
+      setNewLink('');
+      
+      // Fetch link titles from links table
+      if (links.length > 0) {
+        db.links.where('url').anyOf(links).toArray().then(linkRecords => {
+          const titles: Record<string, string> = {};
+          linkRecords.forEach(link => {
+            titles[link.url] = link.title;
+          });
+          setLinkTitles(titles);
+        });
+      } else {
+        setLinkTitles({});
+      }
     }
   }, [task]);
 
@@ -114,6 +141,65 @@ export function TaskDetailSheet({ task, open, onOpenChange }: TaskDetailSheetPro
     updateTaskMutation.mutate({ description });
   };
 
+  const saveTitle = () => {
+    if (taskTitle.trim() && taskTitle !== task?.title) {
+      updateTaskMutation.mutate({ title: taskTitle.trim() });
+    }
+    setIsEditingTitle(false);
+  };
+
+  const handleAddLink = async () => {
+    if (!newLink.trim() || !task?.id) return;
+
+    let linkText = newLink.trim();
+    
+    // Normalize URL - add https:// if missing
+    if (!linkText.match(/^https?:\/\//i)) {
+      linkText = 'https://' + linkText;
+    }
+    
+    // Validate URL
+    try {
+      new URL(linkText);
+    } catch {
+      toast.error('Please enter a valid URL');
+      return;
+    }
+
+    // Check if link already exists
+    if (localLinks.includes(linkText)) {
+      toast.error('This link is already added');
+      setNewLink('');
+      return;
+    }
+
+    // Add to local state immediately
+    const updatedLinks = [...localLinks, linkText];
+    setLocalLinks(updatedLinks);
+    
+    // Update task with new links array
+    updateTaskMutation.mutate({ externalLinks: updatedLinks });
+    
+    // Extract and save link to links table (this will fetch the title)
+    await extractAndSaveLinks(linkText, task.id);
+    
+    // Refresh link titles after adding
+    db.links.where('url').equals(linkText).first().then(linkRecord => {
+      if (linkRecord) {
+        setLinkTitles(prev => ({ ...prev, [linkText]: linkRecord.title }));
+      }
+    });
+    
+    setNewLink('');
+    queryClient.invalidateQueries({ queryKey: ['links'] });
+  };
+
+  const handleRemoveLink = (linkToRemove: string) => {
+    const updatedLinks = localLinks.filter(link => link !== linkToRemove);
+    setLocalLinks(updatedLinks);
+    updateTaskMutation.mutate({ externalLinks: updatedLinks });
+  };
+
   const toggleSubTask = (subTaskId: string) => {
     if (!task?.subTasks) return;
     const updated = task.subTasks.map(st => 
@@ -175,7 +261,38 @@ export function TaskDetailSheet({ task, open, onOpenChange }: TaskDetailSheetPro
                 checked={task.status === 'completed'} 
                 onCheckedChange={toggleComplete}
               />
-              <span className={cn(task.status === 'completed' && "line-through")}>{task.title}</span>
+              {isEditingTitle ? (
+                <div className="flex items-center gap-2 flex-1">
+                  <Input
+                    value={taskTitle}
+                    onChange={(e) => setTaskTitle(e.target.value)}
+                    onBlur={saveTitle}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        saveTitle();
+                      } else if (e.key === 'Escape') {
+                        setTaskTitle(task.title || '');
+                        setIsEditingTitle(false);
+                      }
+                    }}
+                    className="flex-1 h-8 text-base font-semibold"
+                    autoFocus
+                  />
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 flex-1 group">
+                  <span className={cn(task.status === 'completed' && "line-through", "flex-1")}>{task.title}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={() => setIsEditingTitle(true)}
+                    title="Edit title"
+                  >
+                    <Edit2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              )}
             </SheetTitle>
             <SheetDescription className="flex items-center gap-2 flex-wrap mt-2">
               <Badge className={cn("text-xs", getPriorityBadgeColor(task.priority))}>
@@ -251,23 +368,74 @@ export function TaskDetailSheet({ task, open, onOpenChange }: TaskDetailSheetPro
 
             <Separator />
 
-            {/* External Link - Compact */}
-            {task.externalLink && (
-              <div>
-                <h3 className="font-semibold text-sm mb-1.5">External Link</h3>
-                <a 
-                  href={task.externalLink} 
-                  target="_blank" 
-                  rel="noopener noreferrer" 
-                  className="flex items-center gap-2 text-blue-600 hover:underline text-sm"
+            {/* External Links - Compact */}
+            <div>
+              <h3 className="font-semibold text-sm mb-1.5">External Links</h3>
+              
+              {/* Display existing links */}
+              {localLinks.length > 0 && (
+                <div className="space-y-2 mb-2">
+                  {localLinks.map((link, index) => {
+                    // Get link title from links table or fallback to type label
+                    const storedTitle = linkTitles[link] || getLinkTypeLabel(link);
+                    const shortUrl = shortenUrl(link, 40);
+                    
+                    return (
+                      <div key={index} className="flex items-start gap-2 p-2 rounded-lg border bg-card hover:bg-accent/50 transition-colors">
+                        <a 
+                          href={link} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="flex-1 min-w-0"
+                        >
+                          <div className="flex items-center gap-2 text-blue-600 hover:underline">
+                            <ExternalLink className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium truncate">{storedTitle}</div>
+                              <div className="text-xs text-muted-foreground truncate">{shortUrl}</div>
+                            </div>
+                          </div>
+                        </a>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 flex-shrink-0"
+                          onClick={() => handleRemoveLink(link)}
+                          title="Remove link"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              
+              {/* Add new link input */}
+              <div className="flex items-center gap-2">
+                <Input
+                  value={newLink}
+                  onChange={(e) => setNewLink(e.target.value)}
+                  placeholder="Paste URL here..."
+                  className="flex-1 h-8 text-sm"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleAddLink();
+                    }
+                  }}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleAddLink}
+                  disabled={!newLink.trim()}
+                  className="h-8 gap-1.5"
                 >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  {task.externalLink.includes('clickup') ? 'Open in ClickUp' :
-                   task.externalLink.includes('figma') ? 'Open in Figma' :
-                   'Open Link'}
-                </a>
+                  <Plus className="h-3.5 w-3.5" />
+                  Add
+                </Button>
               </div>
-            )}
+            </div>
 
             {/* Description - Moved above Images */}
             <div>

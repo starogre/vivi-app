@@ -128,13 +128,35 @@ export function TaskItem({
         
         {task.isStale && <span className="text-base" title="Stale task">🕸️</span>}
         
-        {task.externalLink && (
-          <Badge variant="outline" className="gap-1 text-xs py-0 h-5">
-            <LinkIcon className="h-2.5 w-2.5" />
-            {task.externalLink.includes('clickup') ? 'ClickUp' : 
-             task.externalLink.includes('figma') ? 'Figma' : 'Link'}
-          </Badge>
-        )}
+        {/* Show link badges - support both old externalLink and new externalLinks */}
+        {(() => {
+          const links = task.externalLinks || (task.externalLink ? [task.externalLink] : []);
+          if (links.length === 0) return null;
+          
+          const getLinkLabel = (url: string) => {
+            if (url.includes('clickup')) return 'ClickUp';
+            if (url.includes('figma')) return 'Figma';
+            if (url.includes('docs.google.com/document/') || url.includes('docs.google.com/document')) return 'Google Doc';
+            if (url.includes('docs.google.com/spreadsheets/') || url.includes('docs.google.com/spreadsheets') || url.includes('sheets.google.com')) return 'Google Sheet';
+            return 'Link';
+          };
+          
+          return (
+            <>
+              {links.slice(0, 2).map((link, idx) => (
+                <Badge key={idx} variant="outline" className="gap-1 text-xs py-0 h-5">
+                  <LinkIcon className="h-2.5 w-2.5" />
+                  {getLinkLabel(link)}
+                </Badge>
+              ))}
+              {links.length > 2 && (
+                <Badge variant="outline" className="gap-1 text-xs py-0 h-5">
+                  +{links.length - 2}
+                </Badge>
+              )}
+            </>
+          );
+        })()}
 
         {task.dueDate && (
           <span className={cn(

@@ -1,11 +1,13 @@
 import { Priority, TaskStatus } from './db';
+import { normalizeUrl } from './linkUtils';
 import * as chrono from 'chrono-node';
 
 interface ParsedTask {
   title: string;
   priority: Priority;
   dueDate?: Date;
-  externalLink?: string;
+  externalLink?: string; // Deprecated - for backward compatibility
+  externalLinks?: string[]; // Array of URLs
   status?: TaskStatus;
   completedAt?: Date;
 }
@@ -26,14 +28,46 @@ export function parseTaskInput(input: string): ParsedTask {
   }
 
   // 1. Extract External Links (ClickUp, Figma, etc.)
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
-  const urls = text.match(urlRegex);
+  // Match URLs with or without protocol - be more specific to avoid false positives
+  const urlPatterns = [
+    /https?:\/\/[^\s]+/g,  // URLs with protocol
+    /www\.[a-zA-Z0-9-]+\.[a-zA-Z]{2,}[^\s]*/g,  // www.domain.com
+    /[a-zA-Z0-9-]+\.[a-zA-Z]{2,}\/[^\s]*/g,  // domain.com/path
+  ];
   
-  if (urls && urls.length > 0) {
-    // Take the first URL found
-    externalLink = urls[0];
-    // Remove URL from text
-    text = text.replace(externalLink, '').trim();
+  let allMatches: string[] = [];
+  urlPatterns.forEach(pattern => {
+    const matches = text.match(pattern);
+    if (matches) {
+      allMatches.push(...matches);
+    }
+  });
+  
+  let externalLinks: string[] | undefined;
+  
+  if (allMatches.length > 0) {
+    // Normalize and filter valid URLs
+    externalLinks = allMatches
+      .map(url => {
+        try {
+          const normalized = normalizeUrl(url);
+          // Validate it's a real URL
+          new URL(normalized);
+          return normalized;
+        } catch {
+          return null;
+        }
+      })
+      .filter((url): url is string => url !== null);
+    
+    if (externalLinks.length > 0) {
+      // For backward compatibility, keep first URL in externalLink
+      externalLink = externalLinks[0];
+      // Remove all matched URLs from text
+      allMatches.forEach(url => {
+        text = text.replace(url, '').trim();
+      });
+    }
   }
 
   // 2. Extract Priority with Shortcuts
@@ -76,7 +110,8 @@ export function parseTaskInput(input: string): ParsedTask {
     title,
     priority,
     dueDate,
-    externalLink,
+    externalLink, // Keep for backward compatibility
+    externalLinks, // Array of all URLs found
     status,
     completedAt
   };

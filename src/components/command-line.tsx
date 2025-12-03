@@ -44,6 +44,7 @@ export function CommandLine() {
         completedAt: parsed.completedAt,
         createdAt: new Date(),
         isFocus: false,
+        externalLinks: parsed.externalLinks || (parsed.externalLink ? [parsed.externalLink] : []),
       });
       
       // Extract and save any URLs found in the text
